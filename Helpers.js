@@ -1,5 +1,6 @@
 const fs = require('fs');
 const Jimp = require("jimp");
+const numeric = require('./libs/numeric');
 
 const Helpers = {
     scaleImage: function (image, scaleFactor) {
@@ -49,6 +50,20 @@ const Helpers = {
             image.write(name + '.jpg');
         });
     },
+
+    getStringFromMatrix: function(matrix) {
+        let str = '';
+        str += matrix.length + '\n';
+
+        matrix.forEach(row => {
+            row.forEach(value => {
+                str += parseInt(value.x) + ' ' + parseInt(value.y) + '\n'
+            });
+        });
+
+        return str;
+    },
+
     createMatrix: function (width, height, fillNumber) {
         const matrix = [];
 
@@ -70,13 +85,51 @@ const Helpers = {
     image2Vector: function (image) {
         const gradient = this.getImageGradient(image);
 
-        //this.matrix2image(gradient.x, 'gradients/x' + Math.random() * 10000);
-        //this.matrix2image(gradient.y, 'gradients/y' + Math.random() * 10000);
-
         gradient.x = this.matrix2Vector(gradient.x);
         gradient.y = this.matrix2Vector(gradient.y);
 
         return this.getComplexVector(gradient.x, gradient.y);
+    },
+
+    transposeMatrix: function (matrix) {
+
+        const transposedMatrix = Helpers.createMatrix(matrix.length, matrix[0].length);
+
+        for (let i = 0; i < matrix.length; i++) {
+            for (let j = 0; j < matrix[0].length; j++) {
+                transposedMatrix[j][i] = Helpers.copy(matrix[i][j]);
+            }
+        }
+
+        return transposedMatrix;
+    },
+
+    getConjugateMatrix: function(complexMatrix) {
+        return complexMatrix.map(row => {
+            return row.map(value => {
+                return {
+                    x: value.x,
+                    y: -value.y
+                };
+            });
+        })
+    },  
+
+    multiplyMatrices(first, second) {
+        let m = first.length, q = second[0].length, n = second.length;
+
+        let result = Helpers.createMatrix(q, m, { x: 0, y: 0});
+
+        for (let i = 0; i < m; i++) {
+            for (let j = 0; j < q; j++) {
+                for (let k = 0; k < n; k++) {
+                    let mul = Helpers.multiplyComplexValues(first[i][k], second[k][j]);
+                    result[i][j] = Helpers.addComplexValues(result[i][j], mul);
+                }
+            }
+        }
+
+        return result;
     },
 
     getComplexVector: function (realVector, imaginaryVector) {
@@ -88,8 +141,8 @@ const Helpers = {
 
         realVector.forEach(function (value, idx) {
             complex.push({
-                r: value,
-                i: imaginaryVector[idx]
+                x: value,
+                y: imaginaryVector[idx]
             })
         });
 
@@ -115,9 +168,9 @@ const Helpers = {
 
     getXGradient: function (image) {
         const sobelOperatorX = [
-            [+1, +0, -1],
-            [+2, +0, -2],
-            [+1, +0, -1]
+            [-1, +0, +1],
+            [-2, +0, +2],
+            [-1, +0, +1]
         ];
 
         const matrix = image.matrix;
@@ -150,9 +203,9 @@ const Helpers = {
 
     getYGradient: function (image) {
         const sobelOperatorY = [
-            [+1, +2, +1],
+            [-1, -2, -1],
             [+0, +0, +0],
-            [-1, -2, -1]
+            [+1, +2, +1]
         ];
 
         const matrix = image.matrix;
@@ -186,8 +239,8 @@ const Helpers = {
     substructComplexVectors: function (first, second) {
         return first.map((complexValue, idx) => {
             return {
-                r: complexValue.r - second[idx].r,
-                i: complexValue.i - second[idx].i
+                x: complexValue.x - second[idx].x,
+                y: complexValue.y - second[idx].y
             }
         });
     },
@@ -206,7 +259,7 @@ const Helpers = {
         });
 
         const N = eigenVectors[0].length;
-        const ortogonality = true;
+        const ortogonality = false;
         let featureVector = [];
 
         for (let i = 0; i < N; i++) {
@@ -219,7 +272,7 @@ const Helpers = {
     },
 
     AFS: function (complexVector, complexBaseVector, maxBaseValue, ortogonality) {
-        const afsType = 2;
+        const afsType = 1;
 
         let sum = 0,
             outputValue = 0;
@@ -239,9 +292,12 @@ const Helpers = {
 
             let diff = Helpers.toDegrees(angle) - Helpers.toDegrees(angleBase);
 
-            diff = diff < -180 ?
-                diff + 180 :
-                diff - 180;
+            if (diff < -180) {
+                diff = diff + 180;
+
+            } else if (diff > 180) {
+                diff = diff - 180;
+            }
 
             let angleCoef = ortogonality ?
                 0.5 * (1 + Math.cos(diff)) :
@@ -264,15 +320,19 @@ const Helpers = {
             sum += val;
         }
 
-        return +(outputValue / sum).toFixed(4);
+        return outputValue / sum;
+    },
+
+    copy: function (object) {
+        return JSON.parse(JSON.stringify(object));
     },
 
     getComplexModule: function (complexValue) {
-        return Math.sqrt(Math.pow(complexValue.r, 2) + Math.pow(complexValue.i, 2));
+        return Math.sqrt(Math.pow(complexValue.x, 2) + Math.pow(complexValue.y, 2));
     },
 
     getComplexAngle: function (complexValue) {
-        return Math.atan(complexValue.i / complexValue.r);
+        return Math.atan(complexValue.y / complexValue.x);
     },
 
     toDegrees: function (radians) {
@@ -281,15 +341,15 @@ const Helpers = {
 
     addComplexValues: function (first, second) {
         return {
-            r: first.r + second.r,
-            i: first.i + second.i
+            x: first.x + second.x,
+            y: first.y + second.y
         }
     },
 
     multiplyComplexValues: function (first, second) {
         return {
-            r: first.r * second.r - first.i * second.i,
-            i: first.r * second.i + first.i * second.r
+            x: first.x * second.x - first.y * second.y,
+            y: first.x * second.y + first.y * second.x
         }
     },
 

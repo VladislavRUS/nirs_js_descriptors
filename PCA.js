@@ -1,69 +1,101 @@
 const ml_pca = require('ml-pca');
 const Helpers = require('./Helpers');
+const numeric = require('./libs/numeric');
+const PythonShell = require('python-shell');
+const fs = require('fs');
 
 const PCA = {
-    get: function(dataVectors, lambda, featuresNumber) {
-        const fullImageSize = dataVectors[0].length;
+    get: async function (dataVectors, featuresNumber) {
+        return new Promise(function (resolve, reject) {
+            const fullImageSize = dataVectors[0].length;
 
-        let meanVector = [];
+            let meanVector = [];
 
-        for (let i = 0; i < fullImageSize; i++) {
-            meanVector.push({r: 0, i: 0});
-        }
+            for (let i = 0; i < fullImageSize; i++) {
+                meanVector.push({
+                    x: 0,
+                    y: 0
+                });
+            }
 
-        dataVectors.forEach((vector) => {
-            vector.forEach((complexValue, idx) => {
-                meanVector[idx].r += complexValue.r;
-                meanVector[idx].i += complexValue.i;
-            });
-        });
-
-        //Среднее
-        meanVector.forEach(complexValue => {
-            complexValue.r /= dataVectors.length;
-            complexValue.i /= dataVectors.length;
-        })
-
-        //Вычли среднее
-        dataVectors.forEach(vector => {
-            vector.forEach((complexValue, idx) => {
-                complexValue.r -= meanVector[idx].r;
-                complexValue.i -= meanVector[idx].i;
-            });
-        });
-
-        realVectors = dataVectors.map(vector => vector.map(complexValue => complexValue.r));
-        imagVector = dataVectors.map(vector => vector.map(complexValue => complexValue.i));
-
-        const realPca = new ml_pca(realVectors);
-        const realEigenVectors = realPca.getEigenvectors();
-
-        const imagPca = new ml_pca(imagVector);
-        const imagEigenVectors = imagPca.getEigenvectors();
-
-        const result = [];
-
-        realEigenVectors.forEach((realVector, vectorIdx) => {
-            let vector = [];
-            realVector = realVector.slice(0, featuresNumber);
-
-            realVector.forEach((realValue, valueIdx) => {
-                vector.push({
-                    r: realValue,
-                    i: imagEigenVectors[vectorIdx][valueIdx]
+            dataVectors.forEach((vector) => {
+                vector.forEach((complexValue, idx) => {
+                    meanVector[idx].x += complexValue.x;
+                    meanVector[idx].y += complexValue.y;
                 });
             });
 
-            result.push(vector);
-        });
+            //Среднее
+            meanVector.forEach(complexValue => {
+                complexValue.x /= dataVectors.length;
+                complexValue.y /= dataVectors.length;
+            })
 
-        return {
-            eigenVectors: result,
-            meanVector: meanVector
-        }
+            //Вычли среднее
+            dataVectors.forEach(vector => {
+                vector.forEach((complexValue, idx) => {
+                    complexValue.x -= meanVector[idx].x;
+                    complexValue.y -= meanVector[idx].y;
+                });
+            });
+
+            const transposedData = Helpers.transposeMatrix(dataVectors);
+            const conjugatedMatrix = Helpers.getConjugateMatrix(dataVectors);
+
+            const mul = Helpers.multiplyMatrices(conjugatedMatrix, transposedData);
+
+            fs.writeFileSync('matrix.txt', Helpers.getStringFromMatrix(mul));
+
+            PythonShell.run('eigen_values.py', (err, results) => {
+                if (err) {
+                    reject();
+
+                } else {
+                    results = results
+                        .map(str =>
+                            str.trim()
+                            .replace(/\r/g, '')
+                            .replace(/\[/g, '')
+                            .replace(/\]/g, '')
+                            .replace(/\j/g, '')
+                            .split(' ').join(' '))
+                        .join(' ')
+                        .split(' ')
+                        .filter(str => str !== '');
+
+                    let eigenVectors = Helpers.createMatrix(mul.length, mul.length);
+
+                    let row = 0,
+                        col = 0;
+
+                    for (let i = 0; i < results.length; i += 2) {
+
+                        eigenVectors[row][col] = {
+                            x: parseFloat(results[i]),
+                            y: parseFloat(results[i + 1])
+                        };
+
+                        if (col === mul.length - 1) {
+                            col = 0;
+                            row++;
+
+                        } else {
+                            col++;
+                        }
+                    }
+
+                    eigenVectors = Helpers.multiplyMatrices(transposedData, eigenVectors);
+
+                    resolve({
+                        eigenVectors: eigenVectors,
+                        meanVector: meanVector
+                    });
+                }
+            });
+        });
     },
 
-    apply: function(dataVectors, eigenVectors, meanVector) {
+    apply: function (dataVectors, eigenVectors, meanVector) {
         const featureVectors = [];
 
         dataVectors.forEach(vector => {
